@@ -1,0 +1,284 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "skinRules": {
+      "$ref": "#/definitions/skinRules"
+    },
+    "blacklistedSkinsFromRandomDistribution": {
+      "$ref": "#/definitions/blacklistedSkinsFromRandomDistribution"
+    },
+    "blacklistedSkinsShowInMenu": {
+      "$ref": "#/definitions/blacklistedSkinsShowInMenu"
+    },
+    "skinMixes": {
+      "$ref": "#/definitions/skinMixes"
+    },
+    "menuHotkey": {
+      "$ref": "#/definitions/menuHotkey"
+    },
+    "disableSkinDistribution": {
+      "$ref": "#/definitions/disableSkinDistribution"
+    },
+    "playerFollowsRules": {
+      "$ref": "#/definitions/playerFollowsRules"
+    }
+  },
+  "title": "OSkinConfigModel",
+  "type": "object",
+  "definitions": {
+    "NonEmptyTrimmedString": {
+      "pattern": "^(?=\\S)(?=.*\\S$).*",
+      "type": "string"
+    },
+    "NonEmptyString": {
+      "pattern": "^(?!\\s*$).+",
+      "type": "string"
+    },
+    "BSTFile": {
+      "$ref": "#/definitions/NonEmptyTrimmedString"
+    },
+    "FormID": {
+      "pattern": "^[0-9A-Fa-f]{3,8}$",
+      "type": "string"
+    },
+    "EditorID": {
+      "$ref": "#/definitions/NonEmptyTrimmedString"
+    },
+    "RaceName": {
+      "$ref": "#/definitions/NonEmptyTrimmedString"
+    },
+    "ClassName": {
+      "$ref": "#/definitions/NonEmptyTrimmedString"
+    },
+    "SkinName": {
+      "$ref": "#/definitions/NonEmptyString"
+    },
+    "SkinMix": {
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "$ref": "#/definitions/SkinName",
+          "description": "The pack everything not named below comes from."
+        },
+        "diffuse": {
+          "$ref": "#/definitions/SkinName",
+          "description": "The pack the color maps of the whole body come from."
+        },
+        "normal": {
+          "$ref": "#/definitions/SkinName",
+          "description": "The pack the normal maps of the whole body come from."
+        },
+        "subsurface": {
+          "$ref": "#/definitions/SkinName",
+          "description": "The pack the subsurface (skin tint) maps of the whole body come from."
+        },
+        "specular": {
+          "$ref": "#/definitions/SkinName",
+          "description": "The pack the specular maps of the whole body come from."
+        },
+        "head": {
+          "$ref": "#/definitions/SkinName",
+          "description": "The pack the head takes its files from first. Without it, the head follows the body."
+        },
+        "headNormal": {
+          "$ref": "#/definitions/SkinName",
+          "description": "The pack the head's normal map comes from. It comes before head."
+        },
+        "teeth": {
+          "$ref": "#/definitions/SkinName",
+          "description": "The pack the mouth textures (actors\\character\\mouth) come from."
+        }
+      },
+      "required": [
+        "base"
+      ],
+      "type": "object"
+    },
+    "SkinRule": {
+      "additionalProperties": false,
+      "properties": {
+        "parts": {
+          "description": "The parts of the skin the rule sets: diffuse, normal, subsurface and specular for the whole body, head, headNormal, teeth. Without it, the whole skin, with the pack's other files (face detail maps, elders' maps).",
+          "items": {
+            "enum": [
+              "diffuse",
+              "normal",
+              "subsurface",
+              "specular",
+              "head",
+              "headNormal",
+              "teeth"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "sex": {
+          "description": "Only NPCs of this sex. Without it, both.",
+          "enum": [
+            "female",
+            "male"
+          ],
+          "type": "string"
+        },
+        "race": {
+          "description": "Only NPCs of these races.",
+          "items": {
+            "$ref": "#/definitions/RaceName"
+          },
+          "type": "array"
+        },
+        "class": {
+          "description": "Only NPCs of these classes.",
+          "items": {
+            "$ref": "#/definitions/ClassName"
+          },
+          "type": "array"
+        },
+        "faction": {
+          "description": "Only NPCs in one of these factions.",
+          "items": {
+            "$ref": "#/definitions/EditorID"
+          },
+          "type": "array"
+        },
+        "plugin": {
+          "description": "Only NPCs added or changed by one of these plugins.",
+          "items": {
+            "$ref": "#/definitions/BSTFile"
+          },
+          "type": "array"
+        },
+        "npcFormID": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/definitions/FormID"
+            },
+            "type": "array"
+          },
+          "description": "Only these NPCs, by plugin and FormID.",
+          "propertyNames": {
+            "$ref": "#/definitions/BSTFile"
+          },
+          "type": "object"
+        },
+        "weight": {
+          "description": "Only NPCs whose weight is in [min, max], from 0 to 100, both ends included.",
+          "items": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "vampire": {
+          "description": "true: only vampires. false: no vampires. Without it, both.",
+          "type": "boolean"
+        },
+        "obodyPreset": {
+          "description": "Only NPCs whose OBody preset is one of these BodySlide presets, by the name in the preset file. Needs OBody NG.",
+          "items": {
+            "$ref": "#/definitions/NonEmptyString"
+          },
+          "type": "array"
+        },
+        "skins": {
+          "description": "The packs or mixes the rule gives, one per NPC. \"*\" is every skin with body color maps for the NPC's sex.",
+          "items": {
+            "$ref": "#/definitions/SkinName"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "exceptSkins": {
+          "description": "The skins \"*\" leaves out.",
+          "items": {
+            "$ref": "#/definitions/SkinName"
+          },
+          "type": "array"
+        },
+        "gameSkin": {
+          "description": "true: the parts the rule sets keep the game's textures, in place of skins.",
+          "type": "boolean"
+        },
+        "off": {
+          "description": "true: the rule is switched off.",
+          "type": "boolean"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "skins"
+          ]
+        },
+        {
+          "required": [
+            "gameSkin"
+          ]
+        }
+      ],
+      "type": "object"
+    },
+    "skinRules": {
+      "additionalProperties": {
+        "$ref": "#/definitions/SkinRule"
+      },
+      "default": {},
+      "description": "Named rules, read from top to bottom: each part of an NPC's skin comes from the first rule that fits the NPC and sets that part. Parts no rule sets come from a random skin. A skin picked in the OSkin menu replaces the rules for that NPC.",
+      "propertyNames": {
+        "$ref": "#/definitions/NonEmptyTrimmedString"
+      },
+      "type": "object"
+    },
+    "blacklistedSkinsFromRandomDistribution": {
+      "default": [],
+      "description": "The packs or mixes random skins never give. Rules can still name them.",
+      "items": {
+        "$ref": "#/definitions/SkinName"
+      },
+      "type": "array"
+    },
+    "blacklistedSkinsShowInMenu": {
+      "default": true,
+      "description": "Whether the skins left out of random skins, or of a rule's \"*\" by exceptSkins, still show in the Skins tab, to be picked by hand.",
+      "type": "boolean"
+    },
+    "skinMixes": {
+      "additionalProperties": {
+        "$ref": "#/definitions/SkinMix"
+      },
+      "default": {},
+      "description": "Named mixes of packs. A mix takes each part it names from that pack, and everything else from its base. A mix can't use a pack's name. Wherever a skin name goes, it can be a pack or a mix.",
+      "propertyNames": {
+        "$ref": "#/definitions/SkinName"
+      },
+      "type": "object"
+    },
+    "menuHotkey": {
+      "default": 37,
+      "description": "The key that opens the OSkin menu, as a DirectX scan code (37 is K). 0 is no key, the menu still opens from SKSE Menu Framework.",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "disableSkinDistribution": {
+      "default": "none",
+      "description": "Turns the rules off for a sex, or for everyone. Valid values: \"none\", \"male\", \"female\", \"all\". Skins picked in the menu stay.",
+      "enum": [
+        "none",
+        "male",
+        "female",
+        "all"
+      ],
+      "type": "string"
+    },
+    "playerFollowsRules": {
+      "default": false,
+      "description": "true: the player gets skins from the rules like an NPC, unless one was picked in the menu. false: only rules that name the player (Skyrim.esm 00000007 in npcFormID) apply to them.",
+      "type": "boolean"
+    }
+  }
+}

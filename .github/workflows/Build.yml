@@ -2,9 +2,9 @@ name: Build
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "master" ]
 
 env:
   PROJECT_NAME: OSkin
@@ -110,7 +110,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifacts: ${{ github.workspace }}/contrib/Artifact/${{ env.PROJECT_NAME }}_${{ env.PROJECT_VERSION }}.zip
           tag: ${{ env.PROJECT_VERSION }}
-          commit: main
+          commit: master
           generateReleaseNotes: true
           artifactErrorsFailBuild: true
           makeLatest: "latest"

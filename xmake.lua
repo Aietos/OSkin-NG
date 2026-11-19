@@ -7,7 +7,7 @@ includes("xmake/tasks.lua")
 
 -- set project
 set_project("OSkin")
-set_version("1.0.0")
+set_version("1.1.0")
 set_license("GPL-3.0")
 
 -- set defaults

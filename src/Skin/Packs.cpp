@@ -97,35 +97,103 @@ namespace {
     }
 }  // namespace
 
-void Skin::Packs::Scan() {
-    g_packs.clear();
+namespace {
+    std::string_view TexturesRelative(const std::string& a_path) {
+        std::string_view key{a_path};
 
-    std::error_code error;
-    const fs::path root{packsFolder};
+        if (key.starts_with('\\')) key.remove_prefix(1);
 
-    if (!fs::is_directory(root, error)) {
-        logger::info("No skin packs, {} doesn't exist", packsFolder);
+        if (key.starts_with("data\\")) key.remove_prefix(5);
 
-        return;
+        if (key.starts_with("textures\\")) key.remove_prefix(9);
+
+        return key;
     }
 
-    for (const auto& folder : fs::directory_iterator(root, error)) {
-        if (!folder.is_directory(error)) continue;
+    // A pack can also be a JSON file in oskin_packs that points at a folder another mod installs, so mod managers
+    // and collections can use a skin mod's files where they are. "folder" is under Data\Textures. "keyFolder" is
+    // the folder its files count as (female, male, bretonfemale...); without it the layout is read like a pack
+    // folder. "keys" gives single files another name, or skips them with an empty name.
+    constexpr std::string_view linksFolder{"Data\\SKSE\\Plugins\\OSkin\\oskin_packs"};
 
-        Pack pack;
-        pack.name = ToUtf8(folder.path().filename());
+    struct Link {
+        std::string folder;
+        std::string keyFolder;
+        std::unordered_map<std::string, std::string> keys;
+    };
+
+    // Linked packs' files are outside textures\OSkin, so their paths are kept to know them after a swap
+    std::unordered_map<std::string, std::string> g_linkedKeys;
+
+    std::optional<Link> ReadLink(const fs::path& a_path, const std::string& a_name) {
+        stl::FilePtrManager file{a_path.c_str()};
+
+        if (file.error() != 0) {
+            logger::warn("Couldn't open the linked skin pack {}", a_name);
+
+            return std::nullopt;
+        }
+
+        char buffer[4096];
+        rapidjson::FileReadStream stream(file.get(), buffer, std::size(buffer));
+        rapidjson::Document document;
+
+        if (document.ParseStream(stream).HasParseError() || !document.IsObject()) {
+            logger::warn("The linked skin pack {} isn't a valid JSON object", a_name);
+
+            return std::nullopt;
+        }
+
+        const auto folder{document.FindMember("folder")};
+
+        if (folder == document.MemberEnd() || !folder->value.IsString()) {
+            logger::warn("The linked skin pack {} has no \"folder\"", a_name);
+
+            return std::nullopt;
+        }
+
+        Link link;
+        link.folder = std::format("textures\\{}", TexturesRelative(Normalize(folder->value.GetString())));
+
+        while (link.folder.ends_with('\\')) link.folder.pop_back();
+
+        if (const auto keyFolder{document.FindMember("keyFolder")};
+            keyFolder != document.MemberEnd() && keyFolder->value.IsString()) {
+            link.keyFolder = Normalize(keyFolder->value.GetString());
+
+            while (link.keyFolder.ends_with('\\')) link.keyFolder.pop_back();
+        }
+
+        if (const auto keys{document.FindMember("keys")}; keys != document.MemberEnd() && keys->value.IsObject()) {
+            for (auto member{keys->value.MemberBegin()}; member != keys->value.MemberEnd(); ++member) {
+                if (member->value.IsString()) {
+                    link.keys.emplace(Normalize(member->name.GetString()), Normalize(member->value.GetString()));
+                }
+            }
+        }
+
+        return link;
+    }
+
+    void AddPack(Skin::Packs::Pack&& a_pack, const fs::path& a_folder, const std::string& a_textureFolder,
+                 const Link* a_link) {
+        std::error_code error;
 
         // Sorted, so when two files give the same key the first in alphabetical order wins every time
         std::vector<std::string> files;
 
-        for (const auto& file : fs::recursive_directory_iterator(folder.path(), error)) {
+        for (const auto& file : fs::recursive_directory_iterator(a_folder, error)) {
             if (!file.is_regular_file(error)) continue;
 
-            auto relative{Normalize(ToUtf8(file.path().lexically_relative(folder.path())))};
+            auto relative{Normalize(ToUtf8(file.path().lexically_relative(a_folder)))};
 
             if (relative.ends_with(".dds")) {
                 files.push_back(std::move(relative));
             }
+        }
+
+        if (error) {
+            logger::error("Couldn't read all of {}: {}", ToUtf8(a_folder), error.message());
         }
 
         std::ranges::sort(files);
@@ -136,50 +204,118 @@ void Skin::Packs::Scan() {
         for (const auto& relative : files) {
             std::string key{StripModLayout(relative)};
 
+            if (a_link) {
+                if (const auto renamed{a_link->keys.find(relative)}; renamed != a_link->keys.end()) {
+                    key = renamed->second;
+                } else if (!a_link->keyFolder.empty()) {
+                    key = std::format("{}\\{}", a_link->keyFolder, relative);
+                }
+            }
+
             if (key.empty()) continue;
 
-            if (const auto existing{pack.textures.find(key)}; existing != pack.textures.end()) {
+            if (const auto existing{a_pack.textures.find(key)}; existing != a_pack.textures.end()) {
                 if (++duplicates <= duplicatesLogged) {
-                    logger::warn("The skin pack {} has two files for {}, {} is used and {} isn't", pack.name, key,
+                    logger::warn("The skin pack {} has two files for {}, {} is used and {} isn't", a_pack.name, key,
                                  existing->second, relative);
                 }
 
                 continue;
             }
 
-            MarkSex(pack, key);
+            MarkSex(a_pack, key);
 
             if (key.starts_with("!ube\\")) {
-                pack.ube = true;
+                a_pack.ube = true;
             }
 
-            pack.textures.emplace(std::move(key), std::format("textures\\OSkin\\{}\\{}", pack.name, relative));
+            auto path{std::format("{}\\{}", a_textureFolder, relative)};
+
+            if (a_link) {
+                g_linkedKeys.emplace(TexturesRelative(path), key);
+            }
+
+            a_pack.textures.emplace(std::move(key), std::move(path));
         }
 
-        pack.duplicateFiles = duplicates;
+        a_pack.duplicateFiles = duplicates;
 
         if (duplicates > duplicatesLogged) {
             logger::warn(
                 "The skin pack {} has {} files that another of its files already gives, only the first {} are "
                 "listed above",
-                pack.name, duplicates, duplicatesLogged);
+                a_pack.name, duplicates, duplicatesLogged);
         }
 
-        if (pack.textures.empty()) {
-            logger::warn("The skin pack {} has no .dds files", pack.name);
-            continue;
+        if (a_pack.textures.empty()) {
+            logger::warn("The skin pack {} has no .dds files", a_pack.name);
+            return;
         }
 
-        logger::info("Found the skin pack {} with {} textures ({})", pack.name, pack.textures.size(),
-                     pack.female && pack.male ? "female and male"
-                     : pack.female            ? "female"
-                     : pack.male              ? "male"
-                                              : "no female or male files");
-        g_packs.push_back(std::move(pack));
+        logger::info("Found the skin pack {} with {} textures ({}){}", a_pack.name, a_pack.textures.size(),
+                     a_pack.female && a_pack.male ? "female and male"
+                     : a_pack.female              ? "female"
+                     : a_pack.male                ? "male"
+                                                  : "no female or male files",
+                     a_link ? std::format(", linked to {}", a_link->folder) : "");
+        g_packs.push_back(std::move(a_pack));
+    }
+}  // namespace
+
+void Skin::Packs::Scan() {
+    g_packs.clear();
+    g_linkedKeys.clear();
+
+    std::error_code error;
+
+    if (const fs::path root{packsFolder}; fs::is_directory(root, error)) {
+        for (const auto& folder : fs::directory_iterator(root, error)) {
+            if (!folder.is_directory(error)) continue;
+
+            Pack pack;
+            pack.name = ToUtf8(folder.path().filename());
+            const auto textureFolder{std::format("textures\\OSkin\\{}", pack.name)};
+
+            AddPack(std::move(pack), folder.path(), textureFolder, nullptr);
+        }
+
+        if (error) {
+            logger::error("Couldn't read all of {}: {}", packsFolder, error.message());
+        }
+    } else {
+        logger::info("No skin pack folders, {} doesn't exist", packsFolder);
     }
 
-    if (error) {
-        logger::error("Couldn't read all of {}: {}", packsFolder, error.message());
+    error.clear();
+
+    if (const fs::path links{linksFolder}; fs::is_directory(links, error)) {
+        for (const auto& entry : fs::directory_iterator(links, error)) {
+            if (!entry.is_regular_file(error) || entry.path().extension() != ".json") continue;
+
+            const auto name{ToUtf8(entry.path().stem())};
+
+            if (FindPack(name)) {
+                logger::warn("The linked skin pack {} has the name of a pack folder, it's skipped", name);
+                continue;
+            }
+
+            const auto link{ReadLink(entry.path(), name)};
+
+            if (!link) continue;
+
+            const fs::path folder{fs::path{"Data"} / fs::path{link->folder}};
+
+            if (!fs::is_directory(folder, error)) {
+                logger::info("The linked skin pack {} points to {}, which isn't installed", name, link->folder);
+                error.clear();
+                continue;
+            }
+
+            Pack pack;
+            pack.name = name;
+
+            AddPack(std::move(pack), folder, link->folder, &*link);
+        }
     }
 
     std::ranges::sort(g_packs, {}, &Pack::name);
@@ -193,29 +329,20 @@ const Skin::Packs::Pack* Skin::Packs::FindPack(const std::string_view a_name) {
     return pack == g_packs.end() ? nullptr : &*pack;
 }
 
-namespace {
-    std::string_view TexturesRelative(const std::string& a_path) {
-        std::string_view key{a_path};
-
-        if (key.starts_with('\\')) key.remove_prefix(1);
-
-        if (key.starts_with("data\\")) key.remove_prefix(5);
-
-        if (key.starts_with("textures\\")) key.remove_prefix(9);
-
-        return key;
-    }
-}  // namespace
-
 bool Skin::Packs::IsPackPath(const std::string_view a_texturePath) {
     const auto path{Normalize(a_texturePath)};
+    const auto relative{TexturesRelative(path)};
 
-    return TexturesRelative(path).starts_with(packsPrefix);
+    return relative.starts_with(packsPrefix) || g_linkedKeys.contains(std::string{relative});
 }
 
 std::string Skin::Packs::ToPackKey(const std::string_view a_texturePath) {
     const auto path{Normalize(a_texturePath)};
     auto key{TexturesRelative(path)};
+
+    if (const auto linked{g_linkedKeys.find(std::string{key})}; linked != g_linkedKeys.end()) {
+        return linked->second;
+    }
 
     if (key.starts_with(characterPrefix)) {
         key.remove_prefix(characterPrefix.size());

@@ -1,6 +1,7 @@
 #include "Skin/Packs.h"
 
 #include "STL.h"
+#include "Skin/Archives.h"
 
 namespace {
     constexpr std::string_view packsFolder{"Data\\Textures\\OSkin"};
@@ -100,35 +101,65 @@ namespace {
 void Skin::Packs::Scan() {
     g_packs.clear();
 
+    struct Found {
+        std::string name;
+        // Sorted, so when two files give the same key the first in alphabetical order wins every time. A file both
+        // loose and in an archive is one path, and the game loads the loose one
+        std::set<std::string> files;
+        std::size_t fromArchives{0};
+    };
+
+    // Keyed by the lowercase folder name, since archives store names in lowercase
+    std::map<std::string, Found> found;
+
     std::error_code error;
     const fs::path root{packsFolder};
 
-    if (!fs::is_directory(root, error)) {
-        logger::info("No skin packs, {} doesn't exist", packsFolder);
+    if (fs::is_directory(root, error)) {
+        for (const auto& folder : fs::directory_iterator(root, error)) {
+            if (!folder.is_directory(error)) continue;
+
+            auto name{ToUtf8(folder.path().filename())};
+            auto& entry{found[Normalize(name)]};
+            entry.name = std::move(name);
+
+            for (const auto& file : fs::recursive_directory_iterator(folder.path(), error)) {
+                if (!file.is_regular_file(error)) continue;
+
+                auto relative{Normalize(ToUtf8(file.path().lexically_relative(folder.path())))};
+
+                if (relative.ends_with(".dds")) {
+                    entry.files.insert(std::move(relative));
+                }
+            }
+        }
+
+        if (error) {
+            logger::error("Couldn't read all of {}: {}", packsFolder, error.message());
+        }
+    }
+
+    for (auto& [name, files] : Archives::ListPackFiles()) {
+        auto& entry{found[name]};
+
+        if (entry.name.empty()) entry.name = name;
+
+        for (auto& file : files) {
+            if (entry.files.insert(std::move(file)).second) ++entry.fromArchives;
+        }
+    }
+
+    if (found.empty()) {
+        logger::info("No skin packs, {} doesn't exist and no archive has textures\\OSkin", packsFolder);
 
         return;
     }
 
-    for (const auto& folder : fs::directory_iterator(root, error)) {
-        if (!folder.is_directory(error)) continue;
-
+    for (const auto& [lowerName, entry] : found) {
         Pack pack;
-        pack.name = ToUtf8(folder.path().filename());
+        pack.name = entry.name;
 
-        // Sorted, so when two files give the same key the first in alphabetical order wins every time
-        std::vector<std::string> files;
-
-        for (const auto& file : fs::recursive_directory_iterator(folder.path(), error)) {
-            if (!file.is_regular_file(error)) continue;
-
-            auto relative{Normalize(ToUtf8(file.path().lexically_relative(folder.path())))};
-
-            if (relative.ends_with(".dds")) {
-                files.push_back(std::move(relative));
-            }
-        }
-
-        std::ranges::sort(files);
+        const auto& files{entry.files};
 
         constexpr std::size_t duplicatesLogged{5};
         std::size_t duplicates{0};
@@ -170,16 +201,14 @@ void Skin::Packs::Scan() {
             continue;
         }
 
-        logger::info("Found the skin pack {} with {} textures ({})", pack.name, pack.textures.size(),
+        logger::info("Found the skin pack {} with {} textures ({}, {} from archives)", pack.name,
+                     pack.textures.size(),
                      pack.female && pack.male ? "female and male"
                      : pack.female            ? "female"
                      : pack.male              ? "male"
-                                              : "no female or male files");
+                                              : "no female or male files",
+                     entry.fromArchives);
         g_packs.push_back(std::move(pack));
-    }
-
-    if (error) {
-        logger::error("Couldn't read all of {}: {}", packsFolder, error.message());
     }
 
     std::ranges::sort(g_packs, {}, &Pack::name);
